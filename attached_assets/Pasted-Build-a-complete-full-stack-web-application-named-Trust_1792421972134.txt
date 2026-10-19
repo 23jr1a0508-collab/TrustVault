@@ -1,0 +1,57 @@
+Build a complete full-stack web application named TrustVault — Secure Document Sharing with a Real Audit Trail for a fresher hiring challenge.
+
+TECHNOLOGY:
+
+- Python with FastAPI for the backend.
+- SQLite database for development.
+- HTML, CSS and JavaScript for the frontend.
+- SQLAlchemy ORM for database operations.
+- Secure password hashing and authenticated sessions.
+- Pytest for automated tests.
+
+DESIGN:
+Create a professional, modern enterprise dashboard with a dark navy sidebar, white content area, blue accent colors, clean typography, responsive layout and attractive cards.
+
+Pages:
+
+1. Login page.
+2. Dashboard with document statistics and recent activity.
+3. Documents page with upload, search, category filters and document details.
+4. Document permissions page to grant and revoke access.
+5. Audit logs page.
+6. Admin dashboard showing document activity and permission changes.
+7. User management page.
+
+REQUIRED FUNCTIONALITY:
+
+- Three roles: administrator, document owner and viewer.
+- Users can upload, organise, search and manage documents.
+- Document owners can grant read or edit permissions to named users and revoke them.
+- Enforce all permissions on the server for every read, download, edit and delete request.
+- Store files privately outside the publicly served frontend directory.
+- Validate file extensions, file size and actual file content.
+- Record uploads, downloads, updates, deletions, permission changes and denied access attempts in an audit trail.
+- Search documents by name, owner, category and date.
+- Provide sample accounts for all three roles and safe sample documents for demonstration.
+- Include database initialization and seed data.
+- Add API documentation and clear error messages.
+
+SECURITY REQUIREMENTS:
+
+- Never rely only on hiding buttons in the frontend.
+- Check authentication, document ownership, role and document-specific permissions on every protected server endpoint.
+- Prevent insecure direct object reference attacks, path traversal, unauthorised file access and privilege escalation.
+- Revoking access must immediately block subsequent requests.
+- Use secure password hashing, secure session handling and CSRF protection where applicable.
+- Never expose passwords, session secrets or private file paths.
+- Protect audit records against undetected modification and document the limitations of the chosen design.
+
+TESTING AND DOCUMENTATION:
+
+- Create automated tests for login, roles, document access, direct-ID attacks, unauthorised downloads, edit/delete permissions, permission revocation and denied-access audit records.
+- Include README.md, THREATS.md, PROMPTS.md, requirements.txt and .gitignore.
+- Include database setup, deployment instructions and API role/permission documentation.
+- Make the app runnable in Replit and prepare it for deployment.
+
+IMPORTANT:
+Generate real working backend functionality, not just a static UI or mock buttons. Use maintainable code and explain how to run the tests. Do not claim that security tests pass unless they have actually been executed successfully. Keep the implementation suitable for a seven-day student hiring challenge.

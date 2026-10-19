@@ -1,0 +1,33 @@
+kind = "web"
+previewPath = "/"
+title = "TrustVault"
+description = "A secure document-sharing workspace for hiring teams. Owners upload private files and share read or edit access with named reviewers; administrators manage users and review a hash-linked audit history."
+version = "1.0.0"
+id = "artifacts/trustvault"
+router = "path"
+
+[[services]]
+name = "web"
+paths = ["/"]
+localPort = 22212
+
+[services.development]
+run = "cd ../.. && python -m uvicorn trustvault.app.main:app --host 0.0.0.0 --port $PORT"
+
+[services.production]
+
+[services.production.run]
+args = ["sh", "-c", "cd ../.. && python -m uvicorn trustvault.app.main:app --host 0.0.0.0 --port 22212"]
+
+[services.production.run.env]
+PORT = "22212"
+TRUSTVAULT_ENV = "production"
+TRUSTVAULT_DEMO_SEED = "0"
+
+[services.production.health.startup]
+path = "/healthz"
+
+[services.env]
+PORT = "22212"
+BASE_PATH = "/"
+TRUSTVAULT_ENV = "development"
