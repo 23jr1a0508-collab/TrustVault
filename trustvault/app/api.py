@@ -380,7 +380,7 @@ async def upload_document(
 
 @router.get("/documents/{document_id}")
 def get_document(document_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    document, _ = get_document_or_deny(db, document_id, user, "read")
+    document, _ = get_document_or_deny(db, document_id, user, "download")
     document = db.scalar(
         select(Document).options(joinedload(Document.owner)).where(Document.id == document.id)
     )
