@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from trustvault.app import api, database
 from trustvault.app.main import app
-from trustvault.app.models import AuditLog, Document, User
+from trustvault.app.models import AuditLog, Document, User, UserSession
 from trustvault.app.security import audit_chain_status, hash_password
 
 
@@ -110,6 +110,165 @@ def test_login_hashes_password_and_records_denied_attempt(tmp_path: Path, monkey
         assert "login_denied" in _audit_actions()
     finally:
         client.close()
+
+
+def test_logout_immediately_revokes_a_copied_session_cookie(tmp_path: Path):
+    database.configure_database(f"sqlite:///{tmp_path / 'logout-revocation.db'}")
+    database.Base.metadata.create_all(bind=database.engine)
+    ids = _install_test_users()
+    client, copied_cookie_client = _create_client(), _create_client()
+    try:
+        csrf_token = _login(client, "owner-test", "owner-test-password")
+        signed_cookie = client.cookies.get("trustvault_session")
+        assert signed_cookie
+        copied_cookie_client.cookies.set("trustvault_session", signed_cookie)
+        assert (
+            copied_cookie_client.get("/api/session").json()["user"]["username"]
+            == "owner-test"
+        )
+
+        # A missing CSRF token must not revoke the still-valid session.
+        assert client.post("/api/auth/logout").status_code == 403
+        assert copied_cookie_client.get("/api/session").json()["user"]["id"] == ids["owner"]
+
+        logout = client.post(
+            "/api/auth/logout",
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert logout.status_code == 200
+        assert logout.json() == {"ok": True}
+
+        # Reuse the captured pre-logout cookie from a separate client.
+        assert copied_cookie_client.get("/api/dashboard").status_code == 401
+        fresh_replay = _create_client()
+        try:
+            fresh_replay.cookies.set("trustvault_session", signed_cookie)
+            assert fresh_replay.get("/api/session").json() == {
+                "user": None,
+                "csrf_token": None,
+            }
+        finally:
+            fresh_replay.close()
+
+        with database.SessionLocal() as db:
+            user_sessions = db.scalars(
+                select(UserSession).where(UserSession.user_id == ids["owner"])
+            ).all()
+            assert len(user_sessions) == 1
+            assert user_sessions[0].revoked_at is not None
+            assert len(user_sessions[0].token_hash) == 64
+        assert "logout" in _audit_actions()
+        with database.SessionLocal() as db:
+            replay_denial = db.scalar(
+                select(AuditLog)
+                .where(
+                    AuditLog.action == "denied_access",
+                    AuditLog.target == "/trustvault-api/dashboard",
+                )
+                .order_by(AuditLog.id.desc())
+            )
+            assert replay_denial is not None
+            assert replay_denial.actor_id == ids["owner"]
+            assert json.loads(replay_denial.metadata_json)["status_code"] == 401
+    finally:
+        client.close()
+        copied_cookie_client.close()
+
+
+def test_successful_login_revokes_the_previous_server_session(tmp_path: Path):
+    database.configure_database(f"sqlite:///{tmp_path / 'login-rotation.db'}")
+    database.Base.metadata.create_all(bind=database.engine)
+    ids = _install_test_users()
+    client, old_cookie_client = _create_client(), _create_client()
+    try:
+        _login(client, "owner-test", "owner-test-password")
+        old_cookie = client.cookies.get("trustvault_session")
+        assert old_cookie
+        old_cookie_client.cookies.set("trustvault_session", old_cookie)
+
+        _login(client, "owner-test", "owner-test-password")
+        assert client.get("/api/dashboard").status_code == 200
+        assert old_cookie_client.get("/api/dashboard").status_code == 401
+
+        with database.SessionLocal() as db:
+            sessions = db.scalars(
+                select(UserSession)
+                .where(UserSession.user_id == ids["owner"])
+                .order_by(UserSession.id)
+            ).all()
+            assert len(sessions) == 2
+            assert sessions[0].revoked_at is not None
+            assert sessions[1].revoked_at is None
+    finally:
+        client.close()
+        old_cookie_client.close()
+
+
+def test_expired_server_session_is_rejected_even_with_a_valid_cookie(tmp_path: Path):
+    database.configure_database(f"sqlite:///{tmp_path / 'session-expiry.db'}")
+    database.Base.metadata.create_all(bind=database.engine)
+    ids = _install_test_users()
+    client, replay_client = _create_client(), _create_client()
+    try:
+        _login(client, "owner-test", "owner-test-password")
+        signed_cookie = client.cookies.get("trustvault_session")
+        assert signed_cookie
+        replay_client.cookies.set("trustvault_session", signed_cookie)
+        with database.SessionLocal() as db:
+            session_record = db.scalar(
+                select(UserSession).where(UserSession.user_id == ids["owner"])
+            )
+            assert session_record is not None
+            session_record.expires_at = 0
+            db.commit()
+
+        assert replay_client.get("/api/dashboard").status_code == 401
+        fresh_replay = _create_client()
+        try:
+            fresh_replay.cookies.set("trustvault_session", signed_cookie)
+            assert fresh_replay.get("/api/session").json() == {
+                "user": None,
+                "csrf_token": None,
+            }
+        finally:
+            fresh_replay.close()
+    finally:
+        client.close()
+        replay_client.close()
+
+
+def test_deactivating_user_revokes_all_server_sessions(tmp_path: Path):
+    database.configure_database(f"sqlite:///{tmp_path / 'deactivation-revocation.db'}")
+    database.Base.metadata.create_all(bind=database.engine)
+    ids = _install_test_users()
+    owner_client, replay_client, admin_client = (
+        _create_client(),
+        _create_client(),
+        _create_client(),
+    )
+    try:
+        _login(owner_client, "owner-test", "owner-test-password")
+        owner_cookie = owner_client.cookies.get("trustvault_session")
+        assert owner_cookie
+        replay_client.cookies.set("trustvault_session", owner_cookie)
+        admin_csrf = _login(admin_client, "admin-test", "admin-test-password")
+
+        deactivated = admin_client.delete(
+            f"/api/users/{ids['owner']}",
+            headers={"X-CSRF-Token": admin_csrf},
+        )
+        assert deactivated.status_code == 200
+        assert replay_client.get("/api/dashboard").status_code == 401
+        with database.SessionLocal() as db:
+            session = db.scalar(
+                select(UserSession).where(UserSession.user_id == ids["owner"])
+            )
+            assert session is not None
+            assert session.revoked_at is not None
+    finally:
+        owner_client.close()
+        replay_client.close()
+        admin_client.close()
 
 
 def test_actual_api_prefix_is_mounted_and_session_is_publicly_nullable(tmp_path: Path):

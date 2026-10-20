@@ -4,22 +4,24 @@ import hashlib
 import json
 import secrets
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .database import get_db
-from .models import AuditLog, Document, DocumentPermission, User
+from .models import AuditLog, Document, DocumentPermission, User, UserSession
 
 
 password_hasher = PasswordHasher()
 _audit_lock = threading.RLock()
 GENESIS_HASH = "0" * 64
+SESSION_TTL_SECONDS = 60 * 60 * 8
 
 
 def hash_password(password: str) -> str:
@@ -41,6 +43,74 @@ def public_user(user: User) -> dict[str, Any]:
         "role": user.role,
         "active": user.active,
     }
+
+
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def issue_session(db: Session, user_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    db.add(
+        UserSession(
+            user_id=user_id,
+            token_hash=session_token_hash(token),
+            expires_at=int(time.time()) + SESSION_TTL_SECONDS,
+        )
+    )
+    return token
+
+
+def revoke_session(request: Request, db: Session, user_id: int | None = None) -> int | None:
+    token = request.session.get("session_token")
+    if not isinstance(token, str):
+        return None
+    session_record = db.scalar(
+        select(UserSession).where(UserSession.token_hash == session_token_hash(token))
+    )
+    if not session_record or (user_id is not None and session_record.user_id != user_id):
+        return None
+    if session_record.revoked_at is None:
+        session_record.revoked_at = int(time.time())
+    return session_record.user_id
+
+
+def revoke_user_sessions(db: Session, user_id: int) -> None:
+    db.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=int(time.time()))
+    )
+
+
+def get_session_user(request: Request, db: Session) -> User | None:
+    user_id = request.session.get("user_id")
+    token = request.session.get("session_token")
+    if not isinstance(user_id, int) or not isinstance(token, str):
+        request.session.clear()
+        return None
+
+    session_record = db.scalar(
+        select(UserSession).where(UserSession.token_hash == session_token_hash(token))
+    )
+    if session_record and session_record.user_id == user_id:
+        request.state.audit_actor_id = user_id
+    if (
+        not session_record
+        or session_record.user_id != user_id
+        or session_record.revoked_at is not None
+        or session_record.expires_at <= int(time.time())
+    ):
+        request.session.clear()
+        return None
+
+    user = db.get(User, user_id)
+    if not user or not user.active:
+        session_record.revoked_at = int(time.time())
+        db.commit()
+        request.session.clear()
+        return None
+    return user
 
 
 def _audit_payload(
@@ -136,13 +206,9 @@ def audit_chain_status(db: Session) -> dict[str, Any]:
 
 
 def require_user(request: Request, db: Session = Depends(get_db)) -> User:
-    user_id = request.session.get("user_id")
-    if not isinstance(user_id, int):
+    user = get_session_user(request, db)
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to continue.")
-    user = db.get(User, user_id)
-    if not user or not user.active:
-        request.session.clear()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Your session is no longer active.")
     return user
 
 

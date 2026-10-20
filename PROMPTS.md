@@ -12,7 +12,8 @@ TrustVault was created from a hiring-challenge brief for a secure document-shari
 
 ## Security design decisions
 
-- Signed session cookies are used rather than browser-stored bearer tokens.
+- A signed HttpOnly cookie carries a random session token; only its SHA-256 hash is stored in the database and checked on each authenticated request.
+- Logout, successful re-login, expiry, and administrator deactivation invalidate the corresponding server-side session records.
 - Passwords are hashed with Argon2.
 - Access is checked on the server for each document operation; inaccessible IDs return the same 404 response.
 - Edit permission does not imply delete permission.
@@ -34,9 +35,10 @@ This section records issues observed while building and auditing this project; i
 | TrustVault initially used `/api`, which was already routed to the separate workspace API Server. | Move TrustVault's actual API and docs to `/trustvault-api`; add a test confirming the real app prefix. |
 | The first owner permission screen could not populate recipients because `/users` was administrator-only. | Permit owners to list active non-administrator recipients while keeping user creation/deactivation administrator-only. |
 | The anonymous session check returned 401, which created a misleading browser error and denied-access event during normal login-page loading. | Return a nullable session response and let the UI render the login form for anonymous visitors. |
+| Logout only cleared the signed cookie in the browser; a copied cookie remained valid on the server until its expiry. | Add a server-side session record containing only a token hash; validate it on every authenticated request and revoke it before returning from logout. Also revoke prior sessions on re-login and all sessions on account deactivation. |
 | The browser's CSP blocked the external Google Fonts stylesheet. | Remove the external font import and use a system font stack. |
 | The first new cross-owner audit test failed: access was denied, but a denied download was recorded as `read`. | Record the attempted action as `download`; the expanded tests then passed. |
 | Demo seeding defaulted on even when `TRUSTVAULT_ENV=production` and `TRUSTVAULT_DEMO_SEED` was omitted. | Default seeding off in production and add a test for development-versus-production defaults. |
 | `uv export --locked` could not export because the existing `uv.lock` needed an update. | Leave the project lock unchanged; resolve `requirements.txt` to a temporary file with `uv pip compile` and run the Python dependency audit against that temporary resolution. |
 
-The first expanded test run had 1 failure in 12 tests because of the denied-download audit label. After that correction the 12-test suite passed. Adding the actual-prefix and search/dashboard tests brought the latest run to 14 passed with one Starlette/httpx deprecation warning.
+The first expanded test run had 1 failure in 12 tests because of the denied-download audit label. After that correction the 12-test suite passed. The prior audit suite reached 14 passing tests. Session-replay, session-rotation, session-expiry, and deactivation-revocation regression tests were then added; the latest run passed all 18 tests with one Starlette/httpx deprecation warning.

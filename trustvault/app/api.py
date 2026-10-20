@@ -21,10 +21,14 @@ from .security import (
     audit_chain_status,
     get_document_or_deny,
     hash_password,
+    get_session_user,
+    issue_session,
     public_user,
     record_audit,
     require_csrf,
     require_user,
+    revoke_session,
+    revoke_user_sessions,
     verify_password,
 )
 
@@ -209,9 +213,12 @@ def login(payload: LoginInput, request: Request, db: Session = Depends(get_db)):
         record_audit(db, None, "login_denied", "authentication", {"reason": "invalid_credentials"})
         raise HTTPException(status_code=401, detail="The username or password is incorrect.")
 
+    revoke_session(request, db)
+    session_token = issue_session(db, user.id)
     csrf_token = uuid.uuid4().hex + uuid.uuid4().hex
     request.session.clear()
     request.session["user_id"] = user.id
+    request.session["session_token"] = session_token
     request.session["csrf_token"] = csrf_token
     record_audit(db, user.id, "login", "authentication")
     return {"user": public_user(user), "csrf_token": csrf_token}
@@ -219,10 +226,8 @@ def login(payload: LoginInput, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/session")
 def session_info(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    user = db.get(User, user_id) if isinstance(user_id, int) else None
-    if not user or not user.active:
-        request.session.clear()
+    user = get_session_user(request, db)
+    if not user:
         return {"user": None, "csrf_token": None}
     return {
         "user": public_user(user),
@@ -236,8 +241,10 @@ def logout(
     user: User = Depends(require_csrf),
     db: Session = Depends(get_db),
 ):
-    record_audit(db, user.id, "logout", "authentication")
+    revoke_session(request, db, user.id)
+    db.commit()
     request.session.clear()
+    record_audit(db, user.id, "logout", "authentication")
     return {"ok": True}
 
 
@@ -623,6 +630,7 @@ def deactivate_user(
         if active_admins <= 1:
             raise HTTPException(status_code=409, detail="The last active administrator cannot be deactivated.")
     target_user.active = False
+    revoke_user_sessions(db, target_user.id)
     record_audit(
         db,
         user.id,

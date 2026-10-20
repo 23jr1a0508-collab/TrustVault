@@ -15,7 +15,8 @@ The browser is untrusted. Every protected operation is authorized by the API, re
 | Threat | Control |
 | --- | --- |
 | Password disclosure or weak storage | Argon2 password hashes; passwords are never returned by an API. |
-| Session theft or tampering | Signed, HttpOnly session cookie; eight-hour expiry; `SameSite=Lax`; secure-only cookies in production. |
+| Session theft or tampering | Signed, HttpOnly cookie with `SameSite=Lax`; the cookie contains a random session token whose SHA-256 hash is stored server-side. The server checks that record, revocation state, user, and eight-hour expiry on every authenticated request; production cookies are secure-only. |
+| Reuse of a copied cookie after logout, re-login, or account deactivation | Logout revokes the database session before clearing the browser cookie. Successful re-login revokes the previous cookie's session; administrator deactivation revokes all the target user's sessions. Tests replay captured cookies after each action. |
 | Cross-site request forgery | Session-bound CSRF token required in `X-CSRF-Token` for authenticated mutations. |
 | IDOR and role escalation | Server-side role, owner, and per-document permission checks on every protected route; inaccessible document IDs return 404. |
 | Unauthorized download | Same access check as document read, followed by a private-file response and no-store cache header. |
@@ -39,10 +40,10 @@ For production audit guarantees, send events to a separately administered append
 - SQLite and local files are for development/single-instance demonstrations. Multi-instance deployments need a production database and private object storage with backups.
 - Upload validation checks format structure, not malware. Do not open untrusted documents on privileged workstations; add antivirus/content-disarm scanning before production use.
 - Authentication has no rate limiter or account lockout in this challenge implementation. Add provider-backed throttling before public exposure.
-- Sessions are signed client-side cookies rather than server-side revocable records. Logout clears the browser cookie; a previously copied cookie may remain usable until expiry unless its user is deactivated.
+- Revoked and expired session rows are retained in SQLite; add a retention/cleanup policy before long-term production use.
 - Administrators are trusted to access all documents and user records. Admin actions remain in the audit log.
 - HTTPS termination and secret management are deployment responsibilities. Set `SESSION_SECRET` through the platform's secret manager; never commit it.
-- User deactivation prevents future authentication and invalidates their session on the next request. Audit records are retained; no user or document is hard-deleted through user management.
+- User deactivation prevents future authentication and revokes that user's server-side sessions. Audit records are retained; no user or document is hard-deleted through user management.
 
 ## Challenge scope
 
@@ -50,7 +51,7 @@ This is a hiring-challenge implementation, not a compliance certification or a s
 
 ## Verification performed
 
-- `python -m pytest -q`: 14 passed, with one Starlette/httpx deprecation warning. The warning is from FastAPI's TestClient compatibility path; it did not fail the suite.
+- `python -m pytest -vv`: 18 passed, with one Starlette/httpx deprecation warning. The warning is from FastAPI's TestClient compatibility path; it did not fail the suite.
 - The Python SAST scan returned no findings.
 - `pip-audit` against a temporary resolution of the 9 direct requirements resolved 31 packages and reported no known vulnerabilities. This does not audit system packages or the separate pnpm workspace.
 - The workspace-wide npm dependency scan reported 12 critical, 20 high, 10 moderate, and 2 low findings. It covers more than TrustVault: for example, `orval` is a dev dependency of `lib/api-spec`, while `proxy-addr` belongs to the separate Express API Server. These findings were not changed in this TrustVault-focused audit and require separate reachability triage.

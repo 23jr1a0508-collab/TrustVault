@@ -11,6 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import database
 from .api import router
+from .security import SESSION_TTL_SECONDS
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -41,7 +42,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
     session_cookie="trustvault_session",
-    max_age=60 * 60 * 8,
+    max_age=SESSION_TTL_SECONDS,
     same_site="lax",
     https_only=os.getenv("TRUSTVAULT_ENV", "development").lower() == "production",
 )
@@ -68,7 +69,7 @@ async def security_headers_and_denied_audit(request: Request, call_next):
             from .models import User
             from .security import record_audit
 
-            actor_id = request.session.get("user_id")
+            actor_id = getattr(request.state, "audit_actor_id", request.session.get("user_id"))
             db = database.SessionLocal()
             try:
                 if isinstance(actor_id, int) and db.get(User, actor_id) is None:

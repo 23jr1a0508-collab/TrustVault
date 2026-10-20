@@ -9,6 +9,7 @@ TrustVault is a full-stack document-sharing application for a hiring team. Owner
 - Server-side read, download, edit, delete, and permission checks
 - Extension, size, and file-content validation for uploads
 - Named-user read/edit grants with immediate revocation
+- Server-checked session records; logout, successful re-login, expiry, and account deactivation invalidate old cookies
 - Search by document name, owner, category, and date
 - Audit records for uploads, downloads, updates, deletions, permission changes, authentication, and denied access
 - User administration, API documentation, sample accounts, and security tests
@@ -66,12 +67,12 @@ The tests exercise login, role checks, cross-user and direct-ID attacks, unautho
 ## Implementation map
 
 - `trustvault/app/main.py` — FastAPI app, signed session-cookie middleware, security headers, `/`, `/healthz`, and the public static mount.
-- `trustvault/app/security.py` — Argon2 password hashing, authenticated-user and CSRF checks, document authorization, and hash-linked audit writes/verification.
+- `trustvault/app/security.py` — Argon2 password hashing, server-side session issuance/revocation checks, authenticated-user and CSRF checks, document authorization, and hash-linked audit writes/verification.
 - `trustvault/app/api.py` — authentication, document, permission, user, audit, search, and dashboard endpoints; upload validation and authorized downloads.
-- `trustvault/app/models.py` — user, document, document-permission, and audit-log records.
+- `trustvault/app/models.py` — user, revocable session, document, document-permission, and audit-log records.
 - `trustvault/app/database.py` — SQLite development database, private file directory, schema creation, and sample seeding.
 - `trustvault/app/static/js/app.js`, `trustvault/app/static/css/app.css`, `trustvault/app/templates/index.html` — browser interface and API calls.
-- `trustvault/tests/test_security.py` — executable authorization, upload, audit, and production-seeding checks.
+- `trustvault/tests/test_security.py` — executable session lifecycle, authorization, upload, audit, and production-seeding checks.
 
 ## API and role map
 
@@ -81,7 +82,7 @@ All TrustVault API routes use the actual `/trustvault-api` prefix. The separate 
 | --- | --- |
 | `POST /trustvault-api/auth/login` | Public; invalid credentials receive a generic response and are audited. |
 | `GET /trustvault-api/session` | Public; returns the signed-in user or `null`. |
-| `POST /trustvault-api/auth/logout` | Authenticated session and CSRF token. |
+| `POST /trustvault-api/auth/logout` | Authenticated session and CSRF token; revokes the server-side session before clearing the cookie. |
 | `GET /trustvault-api/dashboard` | Authenticated; document statistics and recent activity are scoped by role and access. |
 | `GET /trustvault-api/documents` | Authenticated; searches by `q`, `owner`, `category`, `from`, and `to`, limited to visible documents. |
 | `POST /trustvault-api/documents` | Owner or administrator plus CSRF token. |
