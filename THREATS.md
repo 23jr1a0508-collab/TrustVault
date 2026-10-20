@@ -8,7 +8,7 @@
 - SQLite database and the private upload directory
 - Browser-to-FastAPI requests across the same origin
 
-The browser is untrusted. Every protected operation is authorized by the API, regardless of what controls the UI shows. Uploaded files are stored in `trustvault/data/private_files/`, not in the mounted static directory; responses never disclose that storage path.
+The browser is untrusted. Every protected operation is authorized by the API, regardless of what controls the UI shows. Uploaded files are stored in `trustvault/data/private_files/`, not in the mounted static directory. FastAPI mounts only `trustvault/app/static/`; document bytes are returned only through the authenticated download route.
 
 ## Controls implemented
 
@@ -21,23 +21,25 @@ The browser is untrusted. Every protected operation is authorized by the API, re
 | Unauthorized download | Same access check as document read, followed by a private-file response and no-store cache header. |
 | Permission revocation delay | Permissions are read from the database on each request; no authorization cache is used. |
 | Path traversal | Client filenames are never used as storage paths; storage names are random UUIDs; resolved path must remain inside the private directory. |
-| Extension/content mismatch | Allowlist plus magic-byte checks for PDF/PNG/JPEG; UTF-8 checks for text; OOXML ZIP structure checks for DOCX/XLSX. |
+| Extension/content mismatch | Allowlist plus basic signature checks for PDF/PNG/JPEG; UTF-8 checks for text; OOXML ZIP structure checks for DOCX/XLSX. These checks do not prove full file validity. |
 | Oversized upload | Read limit of 10 MiB plus one byte; reject files above 10 MiB. |
 | Browser MIME confusion / framing | `nosniff`, CSP, frame denial, and restrictive referrer/permissions headers. |
-| Audit record changes | Each event hashes its canonical content and the preceding event hash; administrator endpoint verifies the chain. |
+| Audit API tampering | The API exposes read endpoints only; there are no audit-log create, update, or delete routes. Tests send write methods and verify they are rejected. |
+| Audit row edits or middle-chain changes | Each event hashes its canonical content and the preceding event hash; the administrator integrity endpoint verifies the chain. A test confirms an in-place row edit is detected. |
 
 ## Audit integrity limits
 
-The hash chain makes accidental edits, missing middle records, and reordering detectable when the remaining chain is checked. It is not a cryptographic signature backed by a separately protected key. An attacker with write access to the SQLite database can rewrite rows and recompute the entire chain; an attacker with filesystem access can also delete or replace the database. The in-process lock serializes writes within one application process only.
+The hash chain makes ordinary row edits, missing middle records, and reordering detectable when the remaining chain is checked. It has no separately stored trusted head: deleting the final record or a suffix leaves a valid prefix, and a database writer can rewrite rows and recompute the entire chain. A passing integrity check therefore does not prove that the log was never truncated or rewritten by someone with database access. The in-process lock serializes writes within one application process only.
 
 For production audit guarantees, send events to a separately administered append-only/WORM system or remote audit service, protect and rotate signing keys outside the database, alert on failed integrity checks, and back up the database and files independently.
 
 ## Known limitations and operational safeguards
 
-- Demo accounts and their documented passwords are intentionally public for local evaluation. Disable demo seeding and bootstrap a unique administrator before publishing.
+- Demo accounts and their documented passwords are intentionally public for local evaluation. Seeding defaults off in production; keep it off and bootstrap a unique administrator before publishing.
 - SQLite and local files are for development/single-instance demonstrations. Multi-instance deployments need a production database and private object storage with backups.
 - Upload validation checks format structure, not malware. Do not open untrusted documents on privileged workstations; add antivirus/content-disarm scanning before production use.
 - Authentication has no rate limiter or account lockout in this challenge implementation. Add provider-backed throttling before public exposure.
+- Sessions are signed client-side cookies rather than server-side revocable records. Logout clears the browser cookie; a previously copied cookie may remain usable until expiry unless its user is deactivated.
 - Administrators are trusted to access all documents and user records. Admin actions remain in the audit log.
 - HTTPS termination and secret management are deployment responsibilities. Set `SESSION_SECRET` through the platform's secret manager; never commit it.
 - User deactivation prevents future authentication and invalidates their session on the next request. Audit records are retained; no user or document is hard-deleted through user management.
@@ -45,3 +47,11 @@ For production audit guarantees, send events to a separately administered append
 ## Challenge scope
 
 This is a hiring-challenge implementation, not a compliance certification or a substitute for a professional security review. `PROMPTS.md` records the high-level build brief; see `tests/` for executable security behavior.
+
+## Verification performed
+
+- `python -m pytest -q`: 14 passed, with one Starlette/httpx deprecation warning. The warning is from FastAPI's TestClient compatibility path; it did not fail the suite.
+- The Python SAST scan returned no findings.
+- `pip-audit` against a temporary resolution of the 9 direct requirements resolved 31 packages and reported no known vulnerabilities. This does not audit system packages or the separate pnpm workspace.
+- The workspace-wide npm dependency scan reported 12 critical, 20 high, 10 moderate, and 2 low findings. It covers more than TrustVault: for example, `orval` is a dev dependency of `lib/api-spec`, while `proxy-addr` belongs to the separate Express API Server. These findings were not changed in this TrustVault-focused audit and require separate reachability triage.
+- The HoundDog privacy scan failed with `HOUNDDOG_SCHEMA_MISMATCH`; it produced no usable result, so no clean HoundDog finding is claimed.

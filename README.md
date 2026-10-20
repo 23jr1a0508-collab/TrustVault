@@ -27,7 +27,7 @@ python -m uvicorn trustvault.app.main:app --host 0.0.0.0 --port 8000
 
 Open the app at port 8000. API documentation is at `/trustvault-api/docs`; the OpenAPI schema is at `/trustvault-api/openapi.json`.
 
-The first run creates a SQLite database at `trustvault/data/trustvault.db`, private files at `trustvault/data/private_files/`, and three safe demonstration accounts:
+The first development run creates a SQLite database at `trustvault/data/trustvault.db`, private files at `trustvault/data/private_files/`, and three safe demonstration accounts:
 
 | Role | Username | Demo password |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ The first run creates a SQLite database at `trustvault/data/trustvault.db`, priv
 | Document owner | `owner` | `VaultOwner!26` |
 | Viewer | `viewer` | `VaultViewer!26` |
 
-These public demo credentials are for local evaluation only. Do not expose a deployment using them. For production, set `TRUSTVAULT_DEMO_SEED=0`, set a unique `SESSION_SECRET`, and create the first administrator using `python -m trustvault.app.seed_admin`. The seed command asks for the password without echoing it.
+These public demo credentials are for local evaluation only. Do not expose a deployment using them. Demo seeding defaults off when `TRUSTVAULT_ENV=production`; keep `TRUSTVAULT_DEMO_SEED=0`, set a unique `SESSION_SECRET`, and create the first administrator using `python -m trustvault.app.seed_admin`. The seed command asks for the password without echoing it.
 
 ## Replit
 
@@ -50,7 +50,7 @@ SQLite and local upload storage are intended for development and a single-instan
 | `SESSION_SECRET` | Random per process in development | Signs the session cookie. Required in production. |
 | `TRUSTVAULT_ENV` | `development` | Set to `production` to require the session secret and secure cookies. |
 | `TRUSTVAULT_DATABASE_URL` | SQLite file under `trustvault/data/` | SQLAlchemy database URL. |
-| `TRUSTVAULT_DEMO_SEED` | `1` | Set to `0` to skip sample users and documents. |
+| `TRUSTVAULT_DEMO_SEED` | `1` in development; `0` by default in production | Set to `0` to skip sample users and documents. |
 | `TRUSTVAULT_ADMIN_DEMO_PASSWORD` | `VaultAdmin!26` | Optional local demo admin password override. |
 | `TRUSTVAULT_OWNER_DEMO_PASSWORD` | `VaultOwner!26` | Optional local demo owner password override. |
 | `TRUSTVAULT_VIEWER_DEMO_PASSWORD` | `VaultViewer!26` | Optional local demo viewer password override. |
@@ -61,7 +61,43 @@ SQLite and local upload storage are intended for development and a single-instan
 python -m pytest -q
 ```
 
-The tests exercise login, role checks, direct-ID attacks, unauthorized downloads, upload validation, read/edit/delete permissions, immediate permission revocation, denied-access auditing, and audit-chain integrity. Do not treat the hash chain as a substitute for an external append-only audit service.
+The tests exercise login, role checks, cross-user and direct-ID attacks, unauthorized downloads, edits and deletes, immediate permission revocation, privilege-escalation attempts, direct file URLs, denied-access auditing, search scoping, dashboard visibility, production seed defaults, read-only audit routes, and audit-chain limits. Do not treat the hash chain as a substitute for an external append-only audit service.
+
+## Implementation map
+
+- `trustvault/app/main.py` — FastAPI app, signed session-cookie middleware, security headers, `/`, `/healthz`, and the public static mount.
+- `trustvault/app/security.py` — Argon2 password hashing, authenticated-user and CSRF checks, document authorization, and hash-linked audit writes/verification.
+- `trustvault/app/api.py` — authentication, document, permission, user, audit, search, and dashboard endpoints; upload validation and authorized downloads.
+- `trustvault/app/models.py` — user, document, document-permission, and audit-log records.
+- `trustvault/app/database.py` — SQLite development database, private file directory, schema creation, and sample seeding.
+- `trustvault/app/static/js/app.js`, `trustvault/app/static/css/app.css`, `trustvault/app/templates/index.html` — browser interface and API calls.
+- `trustvault/tests/test_security.py` — executable authorization, upload, audit, and production-seeding checks.
+
+## API and role map
+
+All TrustVault API routes use the actual `/trustvault-api` prefix. The separate workspace API server owns `/api`; the test client rewrites its short `/api/...` test paths to the TrustVault prefix. The registered FastAPI app does not mount TrustVault endpoints at `/api`.
+
+| Method and endpoint | Access enforced by the server |
+| --- | --- |
+| `POST /trustvault-api/auth/login` | Public; invalid credentials receive a generic response and are audited. |
+| `GET /trustvault-api/session` | Public; returns the signed-in user or `null`. |
+| `POST /trustvault-api/auth/logout` | Authenticated session and CSRF token. |
+| `GET /trustvault-api/dashboard` | Authenticated; document statistics and recent activity are scoped by role and access. |
+| `GET /trustvault-api/documents` | Authenticated; searches by `q`, `owner`, `category`, `from`, and `to`, limited to visible documents. |
+| `POST /trustvault-api/documents` | Owner or administrator plus CSRF token. |
+| `GET /trustvault-api/documents/{document_id}` | Administrator, owner, or explicitly shared reader/editor. |
+| `GET /trustvault-api/documents/{document_id}/download` | Same document-level read check; successful downloads are audited. |
+| `PATCH /trustvault-api/documents/{document_id}` | Administrator, owner, or user with an `edit` grant, plus CSRF token. |
+| `DELETE /trustvault-api/documents/{document_id}` | Administrator or document owner, plus CSRF token; an `edit` grant alone is insufficient. |
+| `GET /trustvault-api/documents/{document_id}/permissions` | Administrator or document owner. |
+| `PUT /trustvault-api/documents/{document_id}/permissions` | Administrator or document owner plus CSRF token; assigns `read` or `edit` to a named active user. |
+| `DELETE /trustvault-api/documents/{document_id}/permissions/{target_user_id}` | Administrator or document owner plus CSRF token. |
+| `GET /trustvault-api/users` | Administrator; owners receive only active non-administrator recipients; viewers are denied. |
+| `POST /trustvault-api/users` and `DELETE /trustvault-api/users/{target_user_id}` | Administrator plus CSRF token. |
+| `GET /trustvault-api/audit-logs` | Authenticated; administrators see all records, other roles are scoped to their activity and visible documents. |
+| `GET /trustvault-api/audit-logs/integrity` | Administrator only. No audit-log create, update, or delete endpoint is registered. |
+
+API documentation is at `/trustvault-api/docs`; the OpenAPI schema is at `/trustvault-api/openapi.json`.
 
 ## Permission model
 

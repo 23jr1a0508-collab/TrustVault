@@ -123,6 +123,64 @@ def test_actual_api_prefix_is_mounted_and_session_is_publicly_nullable(tmp_path:
         client.close()
 
 
+def test_search_scopes_results_and_admin_dashboard_shows_permission_activity(tmp_path: Path):
+    database.configure_database(f"sqlite:///{tmp_path / 'search-dashboard.db'}")
+    database.Base.metadata.create_all(bind=database.engine)
+    ids = _install_test_users()
+    private_dir = tmp_path / "private"
+    private_dir.mkdir()
+    database.PRIVATE_FILES_DIR = private_dir
+    api.PRIVATE_FILES_DIR = private_dir
+    owner_client, viewer_client, admin_client = (
+        _create_client(),
+        _create_client(),
+        _create_client(),
+    )
+    try:
+        owner_csrf = _login(owner_client, "owner-test", "owner-test-password")
+        viewer_csrf = _login(viewer_client, "viewer-test", "viewer-test-password")
+        _login(admin_client, "admin-test", "admin-test-password")
+        resume = _upload(owner_client, owner_csrf, "Candidate Resume", "Candidate files")
+        panel_notes = _upload(owner_client, owner_csrf, "Panel Summary", "Interview notes")
+        grant = owner_client.put(
+            f"/api/documents/{resume['id']}/permissions",
+            headers={"X-CSRF-Token": owner_csrf},
+            json={"user_id": ids["viewer"], "level": "read"},
+        )
+        assert grant.status_code == 200
+
+        assert [doc["id"] for doc in owner_client.get("/api/documents?q=Resume").json()] == [
+            resume["id"]
+        ]
+        assert len(owner_client.get("/api/documents?owner=Owner%20Tester").json()) == 2
+        assert [
+            doc["id"]
+            for doc in owner_client.get("/api/documents?category=Interview%20notes").json()
+        ] == [panel_notes["id"]]
+        day = resume["created_at"][:10]
+        assert len(owner_client.get(f"/api/documents?from={day}&to={day}").json()) == 2
+
+        visible_to_viewer = viewer_client.get("/api/documents").json()
+        assert [doc["id"] for doc in visible_to_viewer] == [resume["id"]]
+        assert viewer_client.get("/api/documents?q=Panel").json() == []
+
+        admin_dashboard = admin_client.get("/api/dashboard")
+        assert admin_dashboard.status_code == 200
+        assert admin_dashboard.json()["stats"]["documents"] == 2
+        assert admin_dashboard.json()["stats"]["users"] == 3
+        assert admin_dashboard.json()["stats"]["shared"] == 1
+        assert "permission_grant" in {
+            event["action"] for event in admin_dashboard.json()["recent_activity"]
+        }
+        assert owner_client.get("/api/dashboard").json()["stats"]["documents"] == 2
+        assert viewer_client.get("/api/dashboard").json()["stats"]["documents"] == 1
+        assert viewer_csrf
+    finally:
+        owner_client.close()
+        viewer_client.close()
+        admin_client.close()
+
+
 def test_direct_id_and_download_denied_until_permission_is_granted_and_revoked(tmp_path: Path):
     database.configure_database(f"sqlite:///{tmp_path / 'access.db'}")
     database.Base.metadata.create_all(bind=database.engine)

@@ -53,7 +53,11 @@ def initialize_database() -> None:
     from .models import AuditLog, Document, DocumentPermission, User
 
     Base.metadata.create_all(bind=engine)
-    seed_default = "0" if os.getenv("TRUSTVAULT_ENV", "development").lower() == "production" else "1"
+    seed_default = (
+        "0"
+        if os.getenv("TRUSTVAULT_ENV", "development").strip().lower() == "production"
+        else "1"
+    )
     if os.getenv("TRUSTVAULT_DEMO_SEED", seed_default).strip().lower() in {"0", "false", "no"}:
         return
 
