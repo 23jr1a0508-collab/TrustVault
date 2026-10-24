@@ -6,10 +6,9 @@ TrustVault is a full-stack document-sharing application for a hiring team. Owner
 **Live Application:** https://trustvault-jnmc.onrender.com
 
 ### Demo Accounts
-
 | Role | Username | Password |
 |---|---|---|
-| Admin | `admin` | `VaultAdmin!26` |
+| Admin | `admin` | `TvAdmin#2026!SecureK9` |
 | Document Owner | `owner` | `VaultOwner!26` |
 | Viewer | `viewer` | `VaultViewer!26` |
 
