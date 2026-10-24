@@ -11,8 +11,12 @@ TrustVault is a full-stack document-sharing application for a hiring team. Owner
 | Admin | `admin` | `TvAdmin#2026!SecureK9` |
 | Document Owner | `owner` | `VaultOwner!26` |
 | Viewer | `viewer` | `VaultViewer!26` |
+## Demo Video
 
-**Note:** These demo credentials must be verified on the live application before evaluation.
+Watch the TrustVault project demonstration:
+
+[**Watch the 5-minute demo video on Google Drive**](https://drive.google.com/file/d/1w-3WBR9ej2arUrqVeXvfFjtMtiPbT-t9/view?usp=sharing)
+
 
 Sign in using the live evaluation accounts listed in the Demo Accounts section below.
 ## Features
