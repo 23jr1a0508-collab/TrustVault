@@ -1,9 +1,19 @@
 # TrustVault
 
 TrustVault is a full-stack document-sharing application for a hiring team. Owners upload private files and grant named users read or edit access. The server checks access on every protected document request, and significant actions are recorded in a hash-linked audit log.
-## Live Demo
+## Demo Access
 
-**Application:** [https://trustvault-jnmc.onrender.com](https://trustvault-jnmc.onrender.com)
+**Live Application:** https://trustvault-jnmc.onrender.com
+
+### Demo Accounts
+
+| Role | Username | Password |
+|---|---|---|
+| Admin | `admin` | `VaultAdmin!26` |
+| Document Owner | `owner` | `VaultOwner!26` |
+| Viewer | `viewer` | `VaultViewer!26` |
+
+**Note:** These demo credentials must be verified on the live application before evaluation.
 
 Sign in using the live evaluation accounts listed in the Demo Accounts section below.
 ## Features
